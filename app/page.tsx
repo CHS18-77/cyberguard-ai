@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type AnalysisResult = {
   riskScore: number;
@@ -8,310 +8,113 @@ type AnalysisResult = {
   threatType: string;
   confidence: number;
   summary: string;
-  indicators: {
-    title: string;
-    severity: string;
-    explanation: string;
-  }[];
+  indicators: { title: string; severity: string; explanation: string }[];
   recommendedActions: string[];
   safeAlternative: string;
 };
 
+type HistoryItem = Pick<AnalysisResult, "riskScore" | "verdict" | "threatType" | "summary"> & { id: number; date: string };
+
+const navItems = ["Overview", "Analyzer", "Learn", "Password", "Checkup", "Quiz", "History", "About"];
+const examples = [
+  "URGENT: Your bank account has been blocked. Verify your password now at secure-bank-login.com",
+  "Congratulations! You won a $500 gift card. Claim your prize within 10 minutes.",
+  "Hi, this is Maya from HR. Please review the attached onboarding document before Friday.",
+];
+const learnCards = [
+  ["01", "Phishing signals", "Urgency, unusual links, requests for secrets, and unexpected attachments are common warning signs."],
+  ["02", "Account protection", "Use a unique password for every account, enable MFA, and keep recovery details current."],
+  ["03", "Social engineering", "Attackers build trust, create pressure, or impersonate someone you know to change your behavior."],
+];
+const quizQuestions = [
+  { question: "A message asks for your one-time code to ‘cancel’ a payment. What should you do?", choices: ["Share it quickly", "Ignore and verify through the official app", "Forward it to friends"], answer: 1, explanation: "One-time codes are private. Verify unexpected requests using a known, official channel." },
+  { question: "Which link is safest to use for your bank?", choices: ["The link in a surprise SMS", "A shortened link from a caller", "The address you type or bookmark yourself"], answer: 2, explanation: "Use a known official address rather than links supplied in unsolicited messages." },
+];
+
+function scoreLabel(score: number) {
+  if (score <= 20) return "Very safe";
+  if (score <= 40) return "Low risk";
+  if (score <= 60) return "Suspicious";
+  if (score <= 80) return "High risk";
+  return "Critical risk";
+}
+
+function SectionTitle({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
+  return <div className="section-title"><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p>{copy}</p></div>;
+}
+
 export default function Home() {
+  const [active, setActive] = useState("Overview");
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [password, setPassword] = useState("");
+  const [checks, setChecks] = useState([false, false, false, false]);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizChoice, setQuizChoice] = useState<number | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      try { setHistory(JSON.parse(localStorage.getItem("cyberguard-history") || "[]")); } catch { setHistory([]); }
+    });
+  }, []);
+
+  const passwordScore = useMemo(() => {
+    if (!password) return 0;
+    return [password.length >= 12, /[A-Z]/.test(password), /[0-9]/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length;
+  }, [password]);
+  const checkupScore = Math.round((checks.filter(Boolean).length / checks.length) * 100);
 
   const analyzeMessage = async () => {
-    if (!message.trim()) {
-      setError("Please enter a message first.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setResult(null);
-
+    if (!message.trim()) { setError("Enter a message before starting the analysis."); return; }
+    setLoading(true); setError(""); setResult(null);
     try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message }),
-      });
-
+      const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Analysis failed.");
-      }
-
+      if (!response.ok) throw new Error(data.error || "Analysis failed.");
       setResult(data);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
+      const item = { ...data, id: Date.now(), date: new Date().toLocaleString() };
+      const next = [item, ...history].slice(0, 20);
+      setHistory(next);
+      try { localStorage.setItem("cyberguard-history", JSON.stringify(next)); } catch { /* storage is optional */ }
+    } catch (err) { setError(err instanceof Error ? err.message : "Analysis unavailable. Try again."); }
+    finally { setLoading(false); }
   };
 
-  const getRiskLabel = (score: number) => {
-    if (score <= 20) return "Very Safe";
-    if (score <= 40) return "Low Risk";
-    if (score <= 60) return "Suspicious";
-    if (score <= 80) return "High Risk";
-    return "Critical Risk";
-  };
+  const go = (item: string) => { setActive(item); document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: "smooth" }); };
+  const currentQuiz = quizQuestions[quizIndex];
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      {/* Navigation */}
-      <nav className="border-b border-slate-800">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400 text-xl">
-              🛡️
-            </div>
+    <main className="app-shell">
+      <aside className="sidebar">
+        <button className="brand" onClick={() => go("Overview")} aria-label="Go to overview"><span className="brand-mark">CG</span><span><strong>CyberGuard</strong><small>AI AWARENESS CONSOLE</small></span></button>
+        <div className="side-status"><span className="status-dot" /> Systems operational</div>
+        <nav aria-label="Main navigation">{navItems.map((item) => <button key={item} className={active === item ? "nav-item active" : "nav-item"} onClick={() => go(item)}><span className="nav-index">{String(navItems.indexOf(item) + 1).padStart(2, "0")}</span>{item}</button>)}</nav>
+        <div className="sidebar-foot"><span className="tiny-label">PRIVACY MODE</span><p>Message content is processed for analysis and never saved to your history.</p></div>
+      </aside>
 
-            <div>
-              <h1 className="text-xl font-bold">CyberGuard AI</h1>
-              <p className="text-xs text-slate-400">
-                Think before you click.
-              </p>
-            </div>
-          </div>
+      <div className="content-area">
+        <header className="topbar"><span>CYBERSECURITY AWARENESS / {active.toUpperCase()}</span><span className="topbar-date">LOCAL CONSOLE · 2026</span></header>
 
-          <div className="hidden gap-6 text-sm text-slate-300 md:flex">
-            <a href="#" className="hover:text-cyan-400">
-              Home
-            </a>
+        <section id="overview" className="hero page-section"><div className="hero-copy"><span className="eyebrow">PERSONAL THREAT INTELLIGENCE</span><h1>Make the next<br /><em>click</em> a safer one.</h1><p>CyberGuard turns confusing digital threats into clear, practical decisions. Analyze a message, test your habits, and build confidence one signal at a time.</p><div className="hero-actions"><button className="primary-button" onClick={() => go("Analyzer")}>Analyze a message <span>→</span></button><button className="text-button" onClick={() => go("Learn")}>Explore the field <span>↗</span></button></div></div><div className="hero-visual" aria-hidden="true"><div className="radar"><span /><span /><span /><div className="radar-scan" /></div><div className="radar-label"><span className="status-dot" /> ACTIVE SCAN<br /><strong>THREAT SURFACE</strong></div></div></section>
 
-            <a href="#analyzer" className="hover:text-cyan-400">
-              Analyzer
-            </a>
+        <section className="metrics"><div><span>01</span><strong>Message analysis</strong><p>AI-assisted pattern detection</p></div><div><span>02</span><strong>Local password check</strong><p>Nothing leaves your browser</p></div><div><span>03</span><strong>Practical learning</strong><p>Short lessons, real signals</p></div></section>
 
-            <a href="#learn" className="hover:text-cyan-400">
-              Learn
-            </a>
-          </div>
-        </div>
-      </nav>
+        <section id="analyzer" className="page-section analyzer-section"><SectionTitle eyebrow="01 / SIGNAL ANALYSIS" title="Read between the lines." copy="Paste an email, SMS, or direct message. CyberGuard will surface pressure tactics, impersonation, and other patterns worth a second look." /><div className="analyzer-grid"><div className="analyzer-form panel"><div className="panel-top"><span className="panel-label">INPUT CHANNEL</span><span className="mono">TEXT / 10,000 CHAR MAX</span></div><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Paste a suspicious message here..." aria-label="Message to analyze" /><div className="example-row"><span>TRY AN EXAMPLE</span>{examples.map((example, index) => <button key={index} onClick={() => setMessage(example)}>0{index + 1}</button>)}</div><button className="primary-button full" onClick={analyzeMessage} disabled={loading}>{loading ? "Analyzing signal..." : "Run analysis  →"}</button>{error && <p className="error-message" role="alert">{error}</p>}<p className="disclaimer">Awareness tool only. Never share passwords, OTPs, PINs, or financial data.</p></div><div className="result-panel panel">{result ? <><div className="result-score"><div><span className="panel-label">RISK SCORE</span><strong>{result.riskScore}<small>/100</small></strong><b>{scoreLabel(result.riskScore)}</b></div><div className="score-ring" style={{ "--score": `${result.riskScore * 3.6}deg` } as React.CSSProperties}><span>{result.riskScore}</span></div></div><div className="result-verdict"><span className="panel-label">VERDICT / {result.threatType}</span><h3>{result.verdict}</h3><p>{result.summary}</p></div><div className="result-list"><span className="panel-label">RECOMMENDED NEXT STEPS</span>{result.recommendedActions?.slice(0, 3).map((action, index) => <p key={index}><b>0{index + 1}</b>{action}</p>)}</div></> : <div className="empty-result"><div className="empty-cross">+</div><span>AWAITING INPUT</span><p>Your analysis report will appear here with a risk score, key signals, and safe next steps.</p></div>}</div></div></section>
 
-      {/* Hero */}
-      <section className="mx-auto max-w-6xl px-6 pb-16 pt-20">
-        <div className="max-w-3xl">
-          <div className="mb-6 inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">
-            🛡️ AI-Powered Cybersecurity Awareness
-          </div>
+        <section id="learn" className="page-section"><SectionTitle eyebrow="02 / FIELD NOTES" title="Know the patterns." copy="The strongest defense is a pause. Start with the behaviors attackers rely on most." /><div className="learning-grid">{learnCards.map(([number, title, copy]) => <article className="learn-card" key={number}><span className="card-number">{number}</span><h3>{title}</h3><p>{copy}</p><button className="text-button" onClick={() => go("Quiz")}>Test your knowledge <span>→</span></button></article>)}</div></section>
 
-          <h2 className="text-5xl font-bold leading-tight md:text-6xl">
-            Is this message
-            <span className="text-cyan-400"> safe?</span>
-          </h2>
+        <section id="password" className="page-section split-section"><div><SectionTitle eyebrow="03 / LOCAL CHECK" title="Strengthen your first line." copy="Check password habits locally. Your password is evaluated in this browser and is never sent to a server or stored." /><div className="password-check panel"><label htmlFor="password">ENTER A PASSWORD TO TEST</label><input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Type to check strength" /><div className="strength-bars">{[1, 2, 3, 4].map((bar) => <span key={bar} className={passwordScore >= bar ? "filled" : ""} />)}</div><div className="strength-copy"><strong>{password ? ["Needs work", "Fair", "Good", "Strong"][passwordScore - 1] || "Excellent" : "Waiting for input"}</strong><span>{password.length} characters</span></div><ul><li className={password.length >= 12 ? "done" : ""}>At least 12 characters</li><li className={/[A-Z]/.test(password) ? "done" : ""}>Uppercase letter</li><li className={/[0-9]/.test(password) ? "done" : ""}>Number</li><li className={/[^A-Za-z0-9]/.test(password) ? "done" : ""}>Special character</li></ul></div></div><div id="checkup" className="checkup-card"><SectionTitle eyebrow="04 / SAFETY CHECKUP" title="How ready are you?" copy="A quick self-audit for everyday security habits." /><div className="checkup-score"><strong>{checkupScore}</strong><span>/ 100<br />READINESS</span></div>{["MFA is enabled on important accounts", "Your devices install security updates", "You know how to report a scam", "Your recovery details are current"].map((label, index) => <label className="check-row" key={label}><input type="checkbox" checked={checks[index]} onChange={() => setChecks(checks.map((check, i) => i === index ? !check : check))} /><span>{label}</span></label>)}</div></section>
 
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-400">
-            Paste a suspicious email, SMS, WhatsApp message, or social media
-            message. CyberGuard AI analyzes common cybersecurity warning signs
-            and explains them in simple language.
-          </p>
-        </div>
-      </section>
+        <section id="quiz" className="page-section quiz-section"><SectionTitle eyebrow="05 / PRACTICE RANGE" title="Pause. Check. Decide." copy="Build muscle memory with realistic scenarios." /><div className="quiz-card panel"><span className="panel-label">SCENARIO {quizIndex + 1} / {quizQuestions.length}</span><h3>{currentQuiz.question}</h3><div className="quiz-options">{currentQuiz.choices.map((choice, index) => <button key={choice} className={quizChoice === index ? (index === currentQuiz.answer ? "correct" : "incorrect") : ""} onClick={() => setQuizChoice(index)}>{choice}<span>{String.fromCharCode(65 + index)}</span></button>)}</div>{quizChoice !== null && <div className="quiz-feedback"><strong>{quizChoice === currentQuiz.answer ? "Correct call." : "Take another look."}</strong><p>{currentQuiz.explanation}</p><button className="text-button" onClick={() => { setQuizIndex((quizIndex + 1) % quizQuestions.length); setQuizChoice(null); }}>Next scenario →</button></div>}</div></section>
 
-      {/* Analyzer */}
-      <section id="analyzer" className="mx-auto max-w-4xl px-6 pb-20">
-        <div className="rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl md:p-8">
-          <div className="mb-6">
-            <h3 className="text-2xl font-bold">🔍 Message Analyzer</h3>
+        <section id="history" className="page-section"><SectionTitle eyebrow="06 / PRIVATE LOG" title="Your recent signals." copy="Only analysis metadata is kept here: no message text, secrets, or personal content." /><div className="history-panel panel">{history.length === 0 ? <div className="history-empty">No analyses yet. Your private log will appear after your first successful scan.</div> : <>{history.map((item) => <div className="history-row" key={item.id}><span className="history-score">{item.riskScore}</span><div><strong>{item.verdict}</strong><p>{item.threatType} · {item.date}</p></div><span className="history-summary">{item.summary}</span></div>)}<button className="text-button" onClick={() => { setHistory([]); try { localStorage.removeItem("cyberguard-history"); } catch {} }}>Clear private log</button></>}</div></section>
 
-            <p className="mt-2 text-sm text-slate-400">
-              Paste the message below and let CyberGuard AI check it.
-            </p>
-          </div>
-
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Example: URGENT! Your bank account has been blocked. Verify your password now..."
-            className="min-h-48 w-full resize-none rounded-2xl border border-slate-700 bg-slate-950 p-5 text-white outline-none placeholder:text-slate-600 focus:border-cyan-500"
-          />
-
-          <button
-            onClick={analyzeMessage}
-            disabled={loading}
-            className="mt-5 w-full rounded-2xl bg-cyan-400 px-6 py-4 font-bold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? "Analyzing with AI..." : "Analyze Message →"}
-          </button>
-
-          {/* Error */}
-          {error && (
-            <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-300">
-              ⚠️ {error}
-            </div>
-          )}
-
-          {/* AI Result */}
-          {result && (
-            <div className="mt-8 space-y-6">
-              {/* Risk Score */}
-              <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
-                <div className="flex flex-col items-center justify-between gap-5 sm:flex-row">
-                  <div>
-                    <p className="text-sm text-slate-400">Risk Score</p>
-
-                    <div className="mt-2 text-5xl font-bold text-cyan-400">
-                      {result.riskScore}
-                      <span className="text-xl text-slate-500">/100</span>
-                    </div>
-
-                    <p className="mt-2 text-sm text-slate-400">
-                      {getRiskLabel(result.riskScore)}
-                    </p>
-                  </div>
-
-                  <div className="text-center sm:text-right">
-                    <p className="text-sm text-slate-400">Threat Type</p>
-
-                    <p className="mt-2 text-xl font-bold">
-                      {result.threatType}
-                    </p>
-
-                    <p className="mt-2 text-sm text-slate-400">
-                      AI Confidence: {result.confidence}%
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Verdict */}
-              <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
-                <p className="text-sm text-slate-400">Verdict</p>
-
-                <h4 className="mt-2 text-2xl font-bold">
-                  {result.verdict}
-                </h4>
-
-                <p className="mt-4 leading-7 text-slate-300">
-                  {result.summary}
-                </p>
-              </div>
-
-              {/* Indicators */}
-              {result.indicators?.length > 0 && (
-                <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
-                  <h4 className="text-xl font-bold">
-                    🚩 Warning Signs
-                  </h4>
-
-                  <div className="mt-5 space-y-4">
-                    {result.indicators.map((indicator, index) => (
-                      <div
-                        key={index}
-                        className="rounded-xl border border-slate-800 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <p className="font-semibold">
-                            {indicator.title}
-                          </p>
-
-                          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase text-slate-300">
-                            {indicator.severity}
-                          </span>
-                        </div>
-
-                        <p className="mt-2 text-sm leading-6 text-slate-400">
-                          {indicator.explanation}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recommended Actions */}
-              <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
-                <h4 className="text-xl font-bold">
-                  ✅ Recommended Actions
-                </h4>
-
-                <ul className="mt-5 space-y-3">
-                  {result.recommendedActions?.map((action, index) => (
-                    <li
-                      key={index}
-                      className="rounded-xl bg-slate-900 p-4 text-sm leading-6 text-slate-300"
-                    >
-                      {index + 1}. {action}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Safer Alternative */}
-              <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-6">
-                <h4 className="text-xl font-bold text-cyan-300">
-                  💡 Safer Alternative
-                </h4>
-
-                <p className="mt-3 leading-7 text-slate-300">
-                  {result.safeAlternative}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <p className="mt-6 text-center text-xs text-slate-500">
-            AI analysis is for cybersecurity awareness and does not guarantee
-            that a message is safe.
-          </p>
-        </div>
-      </section>
-
-      {/* Learn */}
-      <section id="learn" className="mx-auto max-w-6xl px-6 pb-20">
-        <h3 className="text-center text-3xl font-bold">
-          Stay safer online
-        </h3>
-
-        <div className="mt-10 grid gap-6 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <div className="text-3xl">🎣</div>
-            <h4 className="mt-4 text-xl font-bold">Spot Phishing</h4>
-
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Learn how attackers use urgency, fake links, and impersonation.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <div className="text-3xl">🔐</div>
-            <h4 className="mt-4 text-xl font-bold">Protect Accounts</h4>
-
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Use strong, unique passwords and enable multi-factor
-              authentication.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <div className="text-3xl">🧠</div>
-            <h4 className="mt-4 text-xl font-bold">Build Awareness</h4>
-
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              Understand common social engineering techniques and stay alert.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800 py-8 text-center text-sm text-slate-500">
-        CyberGuard AI • Built for cybersecurity awareness
-      </footer>
+        <section id="about" className="page-section about-section"><SectionTitle eyebrow="07 / TRUST CENTER" title="Designed for clarity, not certainty." copy="CyberGuard AI is an educational companion. It helps you spot patterns, but no automated system can guarantee that a message is safe." /><div className="about-grid"><div><span className="panel-label">OUR PRINCIPLES</span><p>We keep analysis focused on the message you provide, explain our reasoning in plain language, and encourage verification through official channels.</p></div><div><span className="panel-label">PRIVACY BY DEFAULT</span><p>Analyzer history stores only risk metadata locally in your browser. Password checks never use the network. You stay in control.</p></div></div></section>
+        <footer><span>CYBERGUARD AI</span><span>THINK BEFORE YOU CLICK.</span><span>EDUCATION / 2026</span></footer>
+      </div>
     </main>
   );
 }
