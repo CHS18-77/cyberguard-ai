@@ -57,7 +57,19 @@ export default function Home() {
 
   useEffect(() => {
     queueMicrotask(() => {
-      try { setHistory(JSON.parse(localStorage.getItem("cyberguard-history") || "[]")); } catch { setHistory([]); }
+      try {
+        const stored = JSON.parse(localStorage.getItem("cyberguard-history") || "[]");
+        const safeHistory = Array.isArray(stored) ? stored.filter((item): item is HistoryItem => item && typeof item === "object").map((item) => ({
+          riskScore: Number.isFinite(item.riskScore) ? item.riskScore : 0,
+          verdict: typeof item.verdict === "string" ? item.verdict : "Unknown",
+          threatType: typeof item.threatType === "string" ? item.threatType : "Unclassified",
+          summary: typeof item.summary === "string" ? item.summary : "No summary available.",
+          id: typeof item.id === "number" ? item.id : Date.now(),
+          date: typeof item.date === "string" ? item.date : "Unknown date",
+        })).slice(0, 20) : [];
+        setHistory(safeHistory);
+        localStorage.setItem("cyberguard-history", JSON.stringify(safeHistory));
+      } catch { setHistory([]); }
     });
   }, []);
 
@@ -75,7 +87,14 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Analysis failed.");
       setResult(data);
-      const item = { ...data, id: Date.now(), date: new Date().toLocaleString() };
+      const item: HistoryItem = {
+        riskScore: data.riskScore,
+        verdict: data.verdict,
+        threatType: data.threatType,
+        summary: data.summary,
+        id: Date.now(),
+        date: new Date().toLocaleString(),
+      };
       const next = [item, ...history].slice(0, 20);
       setHistory(next);
       try { localStorage.setItem("cyberguard-history", JSON.stringify(next)); } catch { /* storage is optional */ }
