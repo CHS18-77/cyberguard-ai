@@ -56,6 +56,23 @@ export default function Home() {
   const [quizChoice, setQuizChoice] = useState<number | null>(null);
 
   useEffect(() => {
+    const sections = navItems
+      .map((item) => document.getElementById(item.toLowerCase()))
+      .filter((section): section is HTMLElement => Boolean(section));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible) {
+          const item = navItems.find((name) => name.toLowerCase() === visible.target.id);
+          if (item) setActive(item);
+        }
+      },
+      { rootMargin: "-18% 0px -62% 0px", threshold: [0.1, 0.35, 0.6] },
+    );
+    sections.forEach((section) => observer.observe(section));
+
     queueMicrotask(() => {
       try {
         const stored = JSON.parse(localStorage.getItem("cyberguard-history") || "[]");
@@ -71,6 +88,8 @@ export default function Home() {
         localStorage.setItem("cyberguard-history", JSON.stringify(safeHistory));
       } catch { setHistory([]); }
     });
+
+    return () => observer.disconnect();
   }, []);
 
   const passwordScore = useMemo(() => {
@@ -102,7 +121,11 @@ export default function Home() {
     finally { setLoading(false); }
   };
 
-  const go = (item: string) => { setActive(item); document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: "smooth" }); };
+  const go = (item: string) => {
+    setActive(item);
+    document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => setActive(item), 700);
+  };
   const currentQuiz = quizQuestions[quizIndex];
 
   return (
